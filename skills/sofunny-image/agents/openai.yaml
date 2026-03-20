@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sofunny Image"
+  short_description: "Generate or edit images through New-API using Gemini native image generation"
+  default_prompt: "Use $sofunny-image to generate, edit, or grounded-generate an image through New-API."
