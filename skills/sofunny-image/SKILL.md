@@ -100,6 +100,6 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/sofunny-image/scripts/sofunny-image.js \
 - 本 skill 默认不附带 `tools` 和 `thinking`，避免图片模型在工具模式下失败。
 - `BASE_URL` 应为服务根地址，不要手动带 `/v1`。
 - 若未指定输出路径，脚本默认保存到：
-  - `~/Pictures/sofunny-image/`
+  - 当前工作目录
 - `~/.sofunny-image.env` 中只应使用 `SOFUNNY_*` 变量，避免旧配置混入导致行为不一致。
 - 如果 Gemini 在同一次响应中返回多张图片，脚本默认只保存最后一张，前面的图片视为中间产物。

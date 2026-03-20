@@ -8,7 +8,6 @@ const os = require("node:os");
 const path = require("node:path");
 const HOME = os.homedir();
 const SOFUNNY_ENV_PATH = path.join(HOME, ".sofunny-image.env");
-const DEFAULT_OUTPUT_DIR = path.join(HOME, "Pictures", "sofunny-image");
 
 function printHelp() {
   console.log(`sofunny-image
@@ -213,9 +212,9 @@ function ensureOutputDir(outputPath) {
 }
 
 function defaultOutputPath() {
-  fs.mkdirSync(DEFAULT_OUTPUT_DIR, { recursive: true });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return path.join(DEFAULT_OUTPUT_DIR, `sofunny-image-${stamp}.png`);
+  // 未指定输出路径时，默认把图片写到当前工作目录，便于在调用方当前项目中直接查看产物。
+  return path.join(process.cwd(), `sofunny-image-${stamp}.png`);
 }
 
 function buildOutputPath(requestedOutput) {
