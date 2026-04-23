@@ -1,0 +1,146 @@
+{
+  "skill_name": "godot-harness-init",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "我准备用 Godot 4.6 开始做一个 2D 弹球游戏，工程目录已经建好了，帮我初始化 AI Harness 工作流环境，让 Claude 可以通过 MCP 控制 Godot",
+      "expected_output": "完整的初始化流程：检查环境、godot-mcp 安装、.mcp.json 创建、autoload 注册指引、CLAUDE.md/AGENTS.md/progress.md 创建、MCP 连接验证",
+      "assertions": [
+        {
+          "id": "has_mcp_json",
+          "description": "Response mentions .mcp.json as the MCP config file"
+        },
+        {
+          "id": "has_autoload_step",
+          "description": "Response includes step to install/register McpInteractionServer autoload in Godot"
+        },
+        {
+          "id": "has_claude_md",
+          "description": "Response includes CLAUDE.md (and ideally AGENTS.md) as files to create"
+        },
+        {
+          "id": "has_run_project_warning",
+          "description": "Response warns that runtime tools require MCP run_project (not manual Godot launch)"
+        },
+        {
+          "id": "correct_mcp_location",
+          "description": "Response correctly states MCP config goes in .mcp.json NOT settings.json/settings.local.json"
+        },
+        {
+          "id": "has_directory_convention",
+          "description": "Response mentions the sibling directory convention for godot-mcp (../godot-mcp/)"
+        },
+        {
+          "id": "has_phase_structure",
+          "description": "Response is structured in numbered phases (Phase 1, Phase 2, etc.)"
+        },
+        {
+          "id": "has_gotcha_table",
+          "description": "Response includes a table of known pitfalls/gotchas"
+        },
+        {
+          "id": "has_git_commit",
+          "description": "Response includes an initial git commit step"
+        },
+        {
+          "id": "has_verification_step",
+          "description": "Response includes how to verify MCP connection (get_godot_version or game_screenshot)"
+        }
+      ]
+    },
+    {
+      "id": 1,
+      "prompt": "I have an existing Godot 4 project and want to set up godot-mcp so Claude Code can control it. What do I need to do?",
+      "expected_output": "Step-by-step setup: godot-mcp clone+build, .mcp.json config, mcp_interaction_server autoload, restart Claude Code, verify with get_godot_version",
+      "assertions": [
+        {
+          "id": "has_mcp_json",
+          "description": "Response mentions .mcp.json as the MCP config file"
+        },
+        {
+          "id": "has_autoload_step",
+          "description": "Response includes step to install/register McpInteractionServer autoload in Godot"
+        },
+        {
+          "id": "has_claude_md",
+          "description": "Response includes CLAUDE.md (and ideally AGENTS.md) as files to create"
+        },
+        {
+          "id": "has_run_project_warning",
+          "description": "Response warns that runtime tools require MCP run_project (not manual Godot launch)"
+        },
+        {
+          "id": "correct_mcp_location",
+          "description": "Response correctly states MCP config goes in .mcp.json NOT settings.json/settings.local.json"
+        },
+        {
+          "id": "has_directory_convention",
+          "description": "Response mentions the sibling directory convention for godot-mcp (../godot-mcp/)"
+        },
+        {
+          "id": "has_phase_structure",
+          "description": "Response is structured in numbered phases (Phase 1, Phase 2, etc.)"
+        },
+        {
+          "id": "has_gotcha_table",
+          "description": "Response includes a table of known pitfalls/gotchas"
+        },
+        {
+          "id": "has_git_commit",
+          "description": "Response includes an initial git commit step"
+        },
+        {
+          "id": "has_verification_step",
+          "description": "Response includes how to verify MCP connection (get_godot_version or game_screenshot)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "配置 godot-mcp，我要用 claude 来操控 godot，现在什么都没装",
+      "expected_output": "从零开始的完整流程，包含目录约定、.mcp.json 配置、autoload 注册位置说明（Globals → Autoload）、验证步骤",
+      "assertions": [
+        {
+          "id": "has_mcp_json",
+          "description": "Response mentions .mcp.json as the MCP config file"
+        },
+        {
+          "id": "has_autoload_step",
+          "description": "Response includes step to install/register McpInteractionServer autoload in Godot"
+        },
+        {
+          "id": "has_claude_md",
+          "description": "Response includes CLAUDE.md (and ideally AGENTS.md) as files to create"
+        },
+        {
+          "id": "has_run_project_warning",
+          "description": "Response warns that runtime tools require MCP run_project (not manual Godot launch)"
+        },
+        {
+          "id": "correct_mcp_location",
+          "description": "Response correctly states MCP config goes in .mcp.json NOT settings.json/settings.local.json"
+        },
+        {
+          "id": "has_directory_convention",
+          "description": "Response mentions the sibling directory convention for godot-mcp (../godot-mcp/)"
+        },
+        {
+          "id": "has_phase_structure",
+          "description": "Response is structured in numbered phases (Phase 1, Phase 2, etc.)"
+        },
+        {
+          "id": "has_gotcha_table",
+          "description": "Response includes a table of known pitfalls/gotchas"
+        },
+        {
+          "id": "has_git_commit",
+          "description": "Response includes an initial git commit step"
+        },
+        {
+          "id": "has_verification_step",
+          "description": "Response includes how to verify MCP connection (get_godot_version or game_screenshot)"
+        }
+      ]
+    }
+  ]
+}
