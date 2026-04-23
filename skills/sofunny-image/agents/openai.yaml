@@ -1,4 +1,4 @@
 interface:
   display_name: "Sofunny Image"
-  short_description: "通过 New-API 调用 Gemini 图片生成与编辑"
-  default_prompt: "Use $sofunny-image to generate or edit an image through New-API."
+  short_description: "通过 New-API 按模型前缀调用 Gemini 或 gpt-image 图片生成与编辑"
+  default_prompt: "Use $sofunny-image to generate or edit an image through New-API, automatically choosing Gemini or gpt-image based on the model name."

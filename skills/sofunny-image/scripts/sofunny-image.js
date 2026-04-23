@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// 通过 New-API 的 Gemini 原生接口生成或编辑图片。
+// 通过 New-API 的 Gemini 原生接口或 OpenAI Images API 生成/编辑图片。
 // 配置优先级：命令行参数 > 进程环境变量 > ~/.sofunny-image.env。
 
 const fs = require("node:fs");
@@ -19,6 +19,11 @@ function printHelp() {
   --prompt         必填，图片生成或编辑指令
   --input          可重复传入，一张或多张参考图
   --output         输出文件路径
+  --size           OpenAI 图片尺寸；未传时交由上游使用默认 auto
+  --quality        OpenAI 图片质量，默认 auto
+  --background     OpenAI 背景参数
+  --output-format  OpenAI 输出格式，默认 png
+  --output-compression OpenAI 输出压缩率，默认 100
   --aspect-ratio   图片比例，默认 16:9
   --image-size     图片分辨率，默认 1K
   --model          覆盖模型
@@ -31,6 +36,9 @@ function printHelp() {
 function parseArgs(argv) {
   const result = {
     input: [],
+    quality: "auto",
+    outputFormat: "png",
+    outputCompression: "100",
     aspectRatio: "16:9",
     imageSize: "1K",
   };
@@ -46,6 +54,21 @@ function parseArgs(argv) {
         break;
       case "--output":
         result.output = argv[++i];
+        break;
+      case "--size":
+        result.size = argv[++i];
+        break;
+      case "--quality":
+        result.quality = argv[++i];
+        break;
+      case "--background":
+        result.background = argv[++i];
+        break;
+      case "--output-format":
+        result.outputFormat = argv[++i];
+        break;
+      case "--output-compression":
+        result.outputCompression = argv[++i];
         break;
       case "--aspect-ratio":
         result.aspectRatio = argv[++i];
@@ -186,6 +209,19 @@ function detectMimeType(filePath) {
   }
 }
 
+function getModelFamily(model) {
+  if (typeof model !== "string" || model.trim() === "") {
+    return "unknown";
+  }
+  if (model.startsWith("gemini-")) {
+    return "gemini";
+  }
+  if (model.startsWith("gpt-image-")) {
+    return "openai-images";
+  }
+  return "unknown";
+}
+
 function buildParts(prompt, inputFiles) {
   const parts = [{ text: prompt }];
 
@@ -221,27 +257,31 @@ function buildOutputPath(requestedOutput) {
   return requestedOutput ? path.resolve(requestedOutput) : defaultOutputPath();
 }
 
-async function main() {
-  const cliArgs = parseArgs(process.argv.slice(2));
-  if (cliArgs.help) {
-    printHelp();
-    return;
+function buildOpenAIImagesBody(cliArgs, model) {
+  const body = {
+    model,
+    prompt: cliArgs.prompt,
+    quality: cliArgs.quality,
+    output_format: cliArgs.outputFormat,
+    output_compression: Number.parseInt(cliArgs.outputCompression, 10),
+  };
+
+  if (cliArgs.size) {
+    body.size = cliArgs.size;
   }
 
-  if (!cliArgs.prompt) {
-    throw new Error("缺少 --prompt");
+  if (Number.isNaN(body.output_compression)) {
+    throw new Error("--output-compression 必须是整数");
   }
 
-  const config = resolveConfig(cliArgs);
-  if (!config.apiKey) {
-    if (!config.envFileExists && !process.env.SOFUNNY_API_KEY && !cliArgs.apiKey) {
-      throw new Error(buildEnvFileHint());
-    }
-    throw new Error(
-      "未找到 SOFUNNY_API_KEY，请通过环境变量、~/.sofunny-image.env 或 --api-key 提供。",
-    );
+  if (cliArgs.background) {
+    body.background = cliArgs.background;
   }
 
+  return body;
+}
+
+async function requestGeminiImage(config, cliArgs) {
   const requestBody = {
     contents: [
       {
@@ -282,25 +322,154 @@ async function main() {
     throw new Error(textParts || "响应里没有找到图片数据。");
   }
 
-  // Gemini 图片响应里可能穿插中间图片和最终图片；默认保留最后一张更贴近最终产物。
   const finalImagePart = imageParts[imageParts.length - 1];
+  return {
+    imageBase64: finalImagePart.inlineData.data,
+    returnedImageCount: imageParts.length,
+    text: parts.filter((part) => part?.text).map((part) => part.text).join("\n").trim(),
+    endpoint,
+  };
+}
+
+async function requestOpenAIImageGeneration(config, cliArgs) {
+  const endpoint = `${config.baseUrl}/v1/images/generations`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(buildOpenAIImagesBody(cliArgs, config.model)),
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || `请求失败，状态码 ${response.status}`;
+    throw new Error(message);
+  }
+
+  const imageDataList = Array.isArray(payload?.data) ? payload.data.filter((item) => item?.b64_json) : [];
+  if (imageDataList.length === 0) {
+    throw new Error("响应里没有找到 b64_json 图片数据。");
+  }
+
+  return {
+    imageBase64: imageDataList[imageDataList.length - 1].b64_json,
+    returnedImageCount: imageDataList.length,
+    revisedPrompt: imageDataList[imageDataList.length - 1].revised_prompt || "",
+    endpoint,
+  };
+}
+
+async function requestOpenAIImageEdit(config, cliArgs) {
+  const endpoint = `${config.baseUrl}/v1/images/edits`;
+  const form = new FormData();
+  form.set("model", config.model);
+  form.set("prompt", cliArgs.prompt);
+  form.set("quality", cliArgs.quality);
+  form.set("output_format", cliArgs.outputFormat);
+  form.set("output_compression", cliArgs.outputCompression);
+
+  if (cliArgs.size) {
+    form.set("size", cliArgs.size);
+  }
+
+  if (cliArgs.background) {
+    form.set("background", cliArgs.background);
+  }
+
+  for (const inputFile of cliArgs.input) {
+    const absolutePath = path.resolve(inputFile);
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`输入图片不存在：${absolutePath}`);
+    }
+    const buffer = fs.readFileSync(absolutePath);
+    const blob = new Blob([buffer], { type: detectMimeType(absolutePath) });
+    form.append("image[]", blob, path.basename(absolutePath));
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+    },
+    body: form,
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || `请求失败，状态码 ${response.status}`;
+    throw new Error(message);
+  }
+
+  const imageDataList = Array.isArray(payload?.data) ? payload.data.filter((item) => item?.b64_json) : [];
+  if (imageDataList.length === 0) {
+    throw new Error("响应里没有找到 b64_json 图片数据。");
+  }
+
+  return {
+    imageBase64: imageDataList[imageDataList.length - 1].b64_json,
+    returnedImageCount: imageDataList.length,
+    revisedPrompt: imageDataList[imageDataList.length - 1].revised_prompt || "",
+    endpoint,
+  };
+}
+
+async function main() {
+  const cliArgs = parseArgs(process.argv.slice(2));
+  if (cliArgs.help) {
+    printHelp();
+    return;
+  }
+
+  if (!cliArgs.prompt) {
+    throw new Error("缺少 --prompt");
+  }
+
+  const config = resolveConfig(cliArgs);
+  const modelFamily = getModelFamily(config.model);
+  if (modelFamily === "unknown") {
+    throw new Error(`当前只支持 gemini-* 或 gpt-image-* 模型，收到：${config.model}`);
+  }
+
+  if (!config.apiKey) {
+    if (!config.envFileExists && !process.env.SOFUNNY_API_KEY && !cliArgs.apiKey) {
+      throw new Error(buildEnvFileHint());
+    }
+    throw new Error(
+      "未找到 SOFUNNY_API_KEY，请通过环境变量、~/.sofunny-image.env 或 --api-key 提供。",
+    );
+  }
+
+  let result;
+  if (modelFamily === "gemini") {
+    result = await requestGeminiImage(config, cliArgs);
+  } else if (cliArgs.input.length > 0) {
+    result = await requestOpenAIImageEdit(config, cliArgs);
+  } else {
+    result = await requestOpenAIImageGeneration(config, cliArgs);
+  }
+
   const outputPath = buildOutputPath(cliArgs.output);
   ensureOutputDir(outputPath);
 
-  const buffer = Buffer.from(finalImagePart.inlineData.data, "base64");
+  const buffer = Buffer.from(result.imageBase64, "base64");
   fs.writeFileSync(outputPath, buffer);
 
-  const textParts = parts.filter((part) => part?.text).map((part) => part.text).join("\n").trim();
   const summary = {
     model: config.model,
     base_url: config.baseUrl,
-    returned_image_count: imageParts.length,
+    endpoint: result.endpoint,
+    returned_image_count: result.returnedImageCount,
     saved_image_count: 1,
     outputs: [outputPath],
   };
 
-  if (textParts) {
-    summary.text = textParts;
+  if (result.text) {
+    summary.text = result.text;
+  }
+  if (result.revisedPrompt) {
+    summary.revised_prompt = result.revisedPrompt;
   }
 
   console.log(JSON.stringify(summary, null, 2));
