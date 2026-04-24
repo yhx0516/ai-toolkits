@@ -35,10 +35,16 @@ description: 使用 New-API 按模型前缀自动调用 Gemini 原生接口或 O
 - `SOFUNNY_API_KEY`
 - `SOFUNNY_MODEL`
 
+支持的模型：
+
+- `gemini-3.1-flash-image-preview`（Gemini 原生接口）
+- `gemini-3-pro-image-preview`（Gemini 原生接口）
+- `gpt-image-2`（OpenAI Images API）
+
 默认期望值：
 
 - `SOFUNNY_BASE_URL=http://127.0.0.1:3000`
-- `SOFUNNY_MODEL=gemini-3.1-flash-image-preview`
+- `SOFUNNY_MODEL=gpt-image-2`
 
 ## 安装与执行入口
 
@@ -104,7 +110,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/sofunny-image/scripts/sofunny-image.js \
 - `--output-compression`：可选，OpenAI 输出压缩率；未传时不发送该字段
 - `--aspect-ratio`：可选，默认 `16:9`
 - `--image-size`：可选，默认 `1K`
-- `--model`：可选，默认读取配置，兜底为 `gemini-3.1-flash-image-preview`；`gemini-*` 走 Gemini 原生接口，`gpt-image-*` 走 OpenAI Images API
+- `--model`：可选，默认读取配置，兜底为 `gpt-image-2`；`gemini-*` 走 Gemini 原生接口，`gpt-image-*` 走 OpenAI Images API
 - `--base-url`：可选，覆盖配置中的 base URL
 - `--api-key`：可选，覆盖配置中的 token
 
@@ -130,7 +136,7 @@ node ${CLAUDE_PLUGIN_ROOT}/skills/sofunny-image/scripts/sofunny-image.js \
   1. 展示完整错误信息
   2. 建议用户检查配置（API Key、模型名称、渠道是否可用）
   3. 询问用户是否要重试（相同模型、相同参数）
-  4. 询问用户是否要切换到其他模型（给出推荐，如 `gemini-3.1-flash-image-preview` 或 `gpt-image-2`），由用户决定
+  4. 询问用户是否要切换到其他模型（给出推荐，如 `gpt-image-2`、`gemini-3.1-flash-image-preview`、`gemini-3-pro-image-preview`），由用户决定
 - 不要在用户未确认的情况下更换模型、更换参数或跳过错误。
 
 ## 注意事项
