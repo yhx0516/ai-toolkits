@@ -4,10 +4,13 @@
 // 配置优先级：命令行参数 > 进程环境变量 > ~/.sofunny-image.env。
 
 const fs = require("node:fs");
+const http = require("node:http");
+const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
 const HOME = os.homedir();
 const SOFUNNY_ENV_PATH = path.join(HOME, ".sofunny-image.env");
+let debugEnabled = false;
 
 function printHelp() {
   console.log(`sofunny-image
@@ -29,6 +32,7 @@ function printHelp() {
   --model          覆盖模型
   --base-url       覆盖服务根地址
   --api-key        覆盖 New-API 令牌
+  --debug          输出调试日志到 stderr
   --help           显示帮助
 `);
 }
@@ -85,6 +89,9 @@ function parseArgs(argv) {
       case "--help":
       case "-h":
         result.help = true;
+        break;
+      case "--debug":
+        result.debug = true;
         break;
       default:
         throw new Error(`不支持的参数：${arg}`);
@@ -206,6 +213,112 @@ function detectMimeType(filePath) {
   }
 }
 
+function chooseHttpClient(protocol) {
+  if (protocol === "https:") {
+    return https;
+  }
+  if (protocol === "http:") {
+    return http;
+  }
+  throw new Error(`不支持的协议：${protocol}`);
+}
+
+function readJsonResponse(responseBuffer, endpoint, statusCode) {
+  if (responseBuffer.length === 0) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(responseBuffer.toString("utf8"));
+  } catch (error) {
+    throw new Error(`无法解析上游 JSON 响应：${endpoint} (status=${statusCode})`);
+  }
+}
+
+function sendHttpRequest(endpoint, { method, headers, bodyBuffer }) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(endpoint);
+    const client = chooseHttpClient(url.protocol);
+
+    const request = client.request(
+      {
+        protocol: url.protocol,
+        hostname: url.hostname,
+        port: url.port || undefined,
+        path: `${url.pathname}${url.search}`,
+        method,
+        headers,
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => {
+          chunks.push(Buffer.from(chunk));
+        });
+        response.on("end", () => {
+          const responseBuffer = Buffer.concat(chunks);
+          resolve({
+            status: response.statusCode || 0,
+            ok: (response.statusCode || 0) >= 200 && (response.statusCode || 0) < 300,
+            headers: response.headers,
+            payload: readJsonResponse(responseBuffer, endpoint, response.statusCode || 0),
+          });
+        });
+      },
+    );
+
+    request.setTimeout(0);
+    request.on("timeout", () => {
+      request.destroy(new Error("请求超时"));
+    });
+    request.on("error", (error) => {
+      reject(error);
+    });
+
+    if (bodyBuffer && bodyBuffer.length > 0) {
+      request.write(bodyBuffer);
+    }
+    request.end();
+  });
+}
+
+function buildMultipartBody(fields, files) {
+  const boundary = `----sofunny-image-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  const chunks = [];
+
+  function pushText(name, value) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`, "utf8"));
+    chunks.push(Buffer.from(`Content-Disposition: form-data; name="${name}"\r\n\r\n`, "utf8"));
+    chunks.push(Buffer.from(String(value), "utf8"));
+    chunks.push(Buffer.from("\r\n", "utf8"));
+  }
+
+  function pushFile(name, file) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`, "utf8"));
+    chunks.push(
+      Buffer.from(
+        `Content-Disposition: form-data; name="${name}"; filename="${file.filename}"\r\n`,
+        "utf8",
+      ),
+    );
+    chunks.push(Buffer.from(`Content-Type: ${file.contentType}\r\n\r\n`, "utf8"));
+    chunks.push(file.buffer);
+    chunks.push(Buffer.from("\r\n", "utf8"));
+  }
+
+  for (const [name, value] of fields) {
+    pushText(name, value);
+  }
+  for (const file of files) {
+    pushFile(file.name, file);
+  }
+
+  chunks.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
+  return {
+    boundary,
+    bodyBuffer: Buffer.concat(chunks),
+  };
+}
+
 function getModelFamily(model) {
   if (typeof model !== "string" || model.trim() === "") {
     return "unknown";
@@ -252,6 +365,28 @@ function defaultOutputPath() {
 
 function buildOutputPath(requestedOutput) {
   return requestedOutput ? path.resolve(requestedOutput) : defaultOutputPath();
+}
+
+function debugLog(enabled, message, extra) {
+  if (!enabled) {
+    return;
+  }
+  const prefix = `[sofunny-image ${new Date().toISOString()}]`;
+  if (extra === undefined) {
+    console.error(`${prefix} ${message}`);
+    return;
+  }
+  console.error(`${prefix} ${message} ${JSON.stringify(extra)}`);
+}
+
+function optionalImageParams(cliArgs) {
+  return {
+    has_size: Boolean(cliArgs.size),
+    has_quality: Boolean(cliArgs.quality),
+    has_background: Boolean(cliArgs.background),
+    has_output_format: Boolean(cliArgs.outputFormat),
+    has_output_compression: cliArgs.outputCompression !== undefined,
+  };
 }
 
 function buildOpenAIImagesBody(cliArgs, model) {
@@ -304,16 +439,30 @@ async function requestGeminiImage(config, cliArgs) {
   };
 
   const endpoint = `${config.baseUrl}/v1beta/models/${encodeURIComponent(config.model)}:generateContent`;
-  const response = await fetch(endpoint, {
+  const startedAt = Date.now();
+  debugLog(cliArgs.debug, "request:start", {
+    model_family: "gemini",
+    endpoint,
+    input_count: cliArgs.input.length,
+  });
+  const requestBuffer = Buffer.from(JSON.stringify(requestBody), "utf8");
+  const response = await sendHttpRequest(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
+      "Content-Length": String(requestBuffer.length),
     },
-    body: JSON.stringify(requestBody),
+    bodyBuffer: requestBuffer,
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = response.payload;
+  debugLog(cliArgs.debug, "request:response", {
+    endpoint,
+    status: response.status,
+    ok: response.ok,
+    duration_ms: Date.now() - startedAt,
+  });
   if (!response.ok) {
     const message = payload?.error?.message || `请求失败，状态码 ${response.status}`;
     throw new Error(message);
@@ -338,16 +487,35 @@ async function requestGeminiImage(config, cliArgs) {
 
 async function requestOpenAIImageGeneration(config, cliArgs) {
   const endpoint = `${config.baseUrl}/v1/images/generations`;
-  const response = await fetch(endpoint, {
+  const startedAt = Date.now();
+  debugLog(cliArgs.debug, "request:start", {
+    model_family: "openai-images",
+    mode: "generation",
+    endpoint,
+    input_count: 0,
+    optional_params: optionalImageParams(cliArgs),
+  });
+  const requestBuffer = Buffer.from(
+    JSON.stringify(buildOpenAIImagesBody(cliArgs, config.model)),
+    "utf8",
+  );
+  const response = await sendHttpRequest(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
       "Content-Type": "application/json",
+      "Content-Length": String(requestBuffer.length),
     },
-    body: JSON.stringify(buildOpenAIImagesBody(cliArgs, config.model)),
+    bodyBuffer: requestBuffer,
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = response.payload;
+  debugLog(cliArgs.debug, "request:response", {
+    endpoint,
+    status: response.status,
+    ok: response.ok,
+    duration_ms: Date.now() - startedAt,
+  });
   if (!response.ok) {
     const message = payload?.error?.message || `请求失败，状态码 ${response.status}`;
     throw new Error(message);
@@ -368,20 +536,22 @@ async function requestOpenAIImageGeneration(config, cliArgs) {
 
 async function requestOpenAIImageEdit(config, cliArgs) {
   const endpoint = `${config.baseUrl}/v1/images/edits`;
-  const form = new FormData();
-  form.set("model", config.model);
-  form.set("prompt", cliArgs.prompt);
+  const startedAt = Date.now();
+  const fields = [
+    ["model", config.model],
+    ["prompt", cliArgs.prompt],
+  ];
 
   if (cliArgs.size) {
-    form.set("size", cliArgs.size);
+    fields.push(["size", cliArgs.size]);
   }
 
   if (cliArgs.quality) {
-    form.set("quality", cliArgs.quality);
+    fields.push(["quality", cliArgs.quality]);
   }
 
   if (cliArgs.outputFormat) {
-    form.set("output_format", cliArgs.outputFormat);
+    fields.push(["output_format", cliArgs.outputFormat]);
   }
 
   if (cliArgs.outputCompression !== undefined) {
@@ -389,32 +559,53 @@ async function requestOpenAIImageEdit(config, cliArgs) {
     if (Number.isNaN(outputCompression)) {
       throw new Error("--output-compression 必须是整数");
     }
-    form.set("output_compression", String(outputCompression));
+    fields.push(["output_compression", String(outputCompression)]);
   }
 
   if (cliArgs.background) {
-    form.set("background", cliArgs.background);
+    fields.push(["background", cliArgs.background]);
   }
 
+  const files = [];
   for (const inputFile of cliArgs.input) {
     const absolutePath = path.resolve(inputFile);
     if (!fs.existsSync(absolutePath)) {
       throw new Error(`输入图片不存在：${absolutePath}`);
     }
-    const buffer = fs.readFileSync(absolutePath);
-    const blob = new Blob([buffer], { type: detectMimeType(absolutePath) });
-    form.append("image[]", blob, path.basename(absolutePath));
+    files.push({
+      name: "image[]",
+      filename: path.basename(absolutePath),
+      contentType: detectMimeType(absolutePath),
+      buffer: fs.readFileSync(absolutePath),
+    });
   }
+  const { boundary, bodyBuffer } = buildMultipartBody(fields, files);
 
-  const response = await fetch(endpoint, {
+  debugLog(cliArgs.debug, "request:start", {
+    model_family: "openai-images",
+    mode: "edit",
+    endpoint,
+    input_count: cliArgs.input.length,
+    optional_params: optionalImageParams(cliArgs),
+  });
+
+  const response = await sendHttpRequest(endpoint, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": `multipart/form-data; boundary=${boundary}`,
+      "Content-Length": String(bodyBuffer.length),
     },
-    body: form,
+    bodyBuffer,
   });
 
-  const payload = await response.json().catch(() => ({}));
+  const payload = response.payload;
+  debugLog(cliArgs.debug, "request:response", {
+    endpoint,
+    status: response.status,
+    ok: response.ok,
+    duration_ms: Date.now() - startedAt,
+  });
   if (!response.ok) {
     const message = payload?.error?.message || `请求失败，状态码 ${response.status}`;
     throw new Error(message);
@@ -435,6 +626,7 @@ async function requestOpenAIImageEdit(config, cliArgs) {
 
 async function main() {
   const cliArgs = parseArgs(process.argv.slice(2));
+  debugEnabled = Boolean(cliArgs.debug);
   if (cliArgs.help) {
     printHelp();
     return;
@@ -473,6 +665,10 @@ async function main() {
 
   const buffer = Buffer.from(result.imageBase64, "base64");
   fs.writeFileSync(outputPath, buffer);
+  debugLog(cliArgs.debug, "output:saved", {
+    output_path: outputPath,
+    bytes: buffer.length,
+  });
 
   const summary = {
     model: config.model,
@@ -494,6 +690,12 @@ async function main() {
 }
 
 main().catch((error) => {
+  debugLog(debugEnabled, "request:error", {
+    message: error.message || String(error),
+    cause: error.cause ? String(error.cause) : undefined,
+    code: error.code,
+    stack: error.stack ? error.stack.split("\n").slice(0, 3).join(" | ") : undefined,
+  });
   console.error(error.message || String(error));
   process.exit(1);
 });
