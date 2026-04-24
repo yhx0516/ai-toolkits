@@ -20,10 +20,10 @@ function printHelp() {
   --input          可重复传入，一张或多张参考图
   --output         输出文件路径
   --size           OpenAI 图片尺寸；未传时交由上游使用默认 auto
-  --quality        OpenAI 图片质量，默认 auto
+  --quality        OpenAI 图片质量；未传时不发送
   --background     OpenAI 背景参数
-  --output-format  OpenAI 输出格式，默认 png
-  --output-compression OpenAI 输出压缩率，默认 100
+  --output-format  OpenAI 输出格式；未传时不发送
+  --output-compression OpenAI 输出压缩率；未传时不发送
   --aspect-ratio   图片比例，默认 16:9
   --image-size     图片分辨率，默认 1K
   --model          覆盖模型
@@ -36,9 +36,6 @@ function printHelp() {
 function parseArgs(argv) {
   const result = {
     input: [],
-    quality: "auto",
-    outputFormat: "png",
-    outputCompression: "100",
     aspectRatio: "16:9",
     imageSize: "1K",
   };
@@ -261,17 +258,25 @@ function buildOpenAIImagesBody(cliArgs, model) {
   const body = {
     model,
     prompt: cliArgs.prompt,
-    quality: cliArgs.quality,
-    output_format: cliArgs.outputFormat,
-    output_compression: Number.parseInt(cliArgs.outputCompression, 10),
   };
 
   if (cliArgs.size) {
     body.size = cliArgs.size;
   }
 
-  if (Number.isNaN(body.output_compression)) {
-    throw new Error("--output-compression 必须是整数");
+  if (cliArgs.quality) {
+    body.quality = cliArgs.quality;
+  }
+
+  if (cliArgs.outputFormat) {
+    body.output_format = cliArgs.outputFormat;
+  }
+
+  if (cliArgs.outputCompression !== undefined) {
+    body.output_compression = Number.parseInt(cliArgs.outputCompression, 10);
+    if (Number.isNaN(body.output_compression)) {
+      throw new Error("--output-compression 必须是整数");
+    }
   }
 
   if (cliArgs.background) {
@@ -366,12 +371,25 @@ async function requestOpenAIImageEdit(config, cliArgs) {
   const form = new FormData();
   form.set("model", config.model);
   form.set("prompt", cliArgs.prompt);
-  form.set("quality", cliArgs.quality);
-  form.set("output_format", cliArgs.outputFormat);
-  form.set("output_compression", cliArgs.outputCompression);
 
   if (cliArgs.size) {
     form.set("size", cliArgs.size);
+  }
+
+  if (cliArgs.quality) {
+    form.set("quality", cliArgs.quality);
+  }
+
+  if (cliArgs.outputFormat) {
+    form.set("output_format", cliArgs.outputFormat);
+  }
+
+  if (cliArgs.outputCompression !== undefined) {
+    const outputCompression = Number.parseInt(cliArgs.outputCompression, 10);
+    if (Number.isNaN(outputCompression)) {
+      throw new Error("--output-compression 必须是整数");
+    }
+    form.set("output_compression", String(outputCompression));
   }
 
   if (cliArgs.background) {
